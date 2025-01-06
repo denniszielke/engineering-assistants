@@ -3,6 +3,7 @@ __pycache__/
 *.py[cod]
 *$py.class
 
+scratch.txt
 # C extensions
 *.so
 
