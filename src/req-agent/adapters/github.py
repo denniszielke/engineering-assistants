@@ -22,6 +22,16 @@ class GithubWrapper:
         issue = repo.get_issue(number=issue_number)
         return issue
     
+    async def get_file(self, file_path: str):
+        repo = self.github.get_repo(f"{self.repo_owner}/{self.repo_name}")
+        file_path = "/sample/data/Location.java"
+        contents = repo.get_contents(file_path, ref="main")
+        return contents.decoded_content.decode("utf-8")
+
+    async def add_comment(self, issue_number: int, comment: str):
+        repo = self.github.get_repo(f"{self.repo_owner}/{self.repo_name}")
+        issue = repo.get_issue(number=issue_number)
+        issue.create_comment(comment)
 
     async def add_comment(self, issue_number: int, comment: str):
         repo = self.github.get_repo(f"{self.repo_owner}/{self.repo_name}")

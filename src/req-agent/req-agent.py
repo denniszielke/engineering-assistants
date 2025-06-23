@@ -35,23 +35,39 @@ az_model_client = AzureOpenAIChatCompletionClient(
     # api_key="sk-...", # For key-based authentication.
 )
 
+async def add_comment(issue_number: int, comment: str) -> None:
+    await github.add_comment(issue_number, comment)
+
 planning_agent = AssistantAgent(
     "PlanningAgent",
     description="An agent for planning tasks, this agent should be the first to engage when given a new task.",
     model_client=az_model_client,
+    tools=[add_comment],
     system_message="""
     You are a planning agent.
     Your job is to break down complex tasks into smaller, manageable subtasks.
     Your team members are:
         Engineering Agent: An advanced test case generator agent who is an expert in describing high quality software engineering requirements and test cases.
         Reviewer Agent: Reviews test cases, assess the formal quality of the test cases and provides concrete feedback to improve the quality.
+        SpecificationAgent: An agent for specifying executable scenario in Gherkin format.
 
     You only plan and delegate tasks - you do not execute them yourself.
 
     When assigning tasks, use this format:
     1. <agent> : <task>
 
-    After all tasks are complete, summarize the findings and end with "TERMINATE".
+    After all tasks are complete, summarize the findings and submit the final summary as comment using the add_comment tool then end with "TERMINATE".
+    """,
+)
+
+specification_agent = AssistantAgent(
+    "SpecificationAgent",
+    description="An agent for specifying the scenario in Gherkin, this agent should be the first to engage to write down the scenario in exectuable specification format (Gherkin).",
+    model_client=az_model_client,
+    tools=[add_comment],
+    system_message="""
+    You are a specification agent.
+    Your job write down the scenario in exectuable specification format (Gherkin).
     """,
 )
 
@@ -59,14 +75,19 @@ async def get_requirements(workitem_id: int) -> str:
     issue = await github.get_issue(workitem_id)
     return f"The requirements for {workitem_id} are about {issue}."
 
+async def get_source_code(path: str) -> str:
+    contents = await github.get_file(path)
+    return f"The code for file {path} is {contents}."
+
 engineering_agent = AssistantAgent(
     "EngineeringAgent",
     description="You are an advanced test case generator agent who is an expert in describing high quality software engineering requirements and test cases.",
-    tools=[get_requirements],
+    tools=[get_requirements, get_source_code],
     model_client=az_model_client,
     system_message="""
     You are an agent that generates test case description for software engineering projects.
-    Your only tool is get_requirements - use it to retrieve the list of requirements for a specific workitem.
+    You have a tool called get_requirements - use it to retrieve the list of requirements for a specific workitem.
+    If there is a link to a source code file in the input you should retrieve the file by using the get_source_code tool and validate the test cases based on the objectives and the source code.
     You make only one search call at a time.
     """,
 )
@@ -106,6 +127,7 @@ reviewer_agent = AssistantAgent(
 )
 
 async def main():
+
     text_mention_termination = TextMentionTermination("TERMINATE")
     max_messages_termination = MaxMessageTermination(max_messages=25)
     termination = text_mention_termination | max_messages_termination
@@ -116,13 +138,13 @@ async def main():
         return None
 
     team = SelectorGroupChat(
-        [planning_agent, engineering_agent, reviewer_agent],
+        [planning_agent, engineering_agent, specification_agent],
         model_client=az_model_client,
         termination_condition=termination,
         selector_func=selector_func,
     )
 
-    task = "Create new test cases for feature number 1"
+    task = "Create new test cases and executable specification for feature number 3"
 
     await Console(team.run_stream(task=task))
 
